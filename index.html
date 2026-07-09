@@ -303,6 +303,53 @@
     return null;
   }
 
+  // Incremental extractor for one string field of a STREAMING JSON reply:
+  // feed() it the accumulated text repeatedly; it decodes the key's string value
+  // as it arrives (waiting on escapes split across chunks) so the voice can start
+  // speaking long before the JSON object is complete.
+  function makeTap(key) {
+    var t = { started: false, closed: false, isNull: false, text: '' };
+    var phase = 0, pos = 0;
+    var needle = '"' + key + '"';
+    t.feed = function (acc) {
+      if (phase === 0) {
+        var i = acc.indexOf(needle, pos);
+        if (i < 0) { pos = Math.max(0, acc.length - needle.length); return; }
+        pos = i + needle.length; phase = 1;
+      }
+      if (phase === 1) {
+        while (pos < acc.length) {
+          var c = acc[pos];
+          if (c === ':' || c === ' ' || c === '\n' || c === '\r' || c === '\t') { pos++; continue; }
+          if (c === '"') { phase = 2; t.started = true; pos++; break; }
+          if (acc.length - pos < 4) return;   // could be a partial `null` — wait for more
+          phase = 3; t.closed = true; t.isNull = true; return;
+        }
+        if (phase !== 2) return;
+      }
+      if (phase === 2) {
+        while (pos < acc.length) {
+          var ch = acc[pos];
+          if (ch === '\\') {
+            if (pos + 1 >= acc.length) return;          // escape split across deltas — wait
+            var e = acc[pos + 1];
+            if (e === 'u') {
+              if (pos + 6 > acc.length) return;         // wait for the full \uXXXX
+              var code = parseInt(acc.slice(pos + 2, pos + 6), 16);
+              t.text += isNaN(code) ? '' : String.fromCharCode(code);
+              pos += 6; continue;
+            }
+            t.text += (e === 'n' || e === 'r' || e === 't') ? ' ' : e;
+            pos += 2; continue;
+          }
+          if (ch === '"') { phase = 3; t.closed = true; pos++; return; }
+          t.text += ch; pos++;
+        }
+      }
+    };
+    return t;
+  }
+
   // A run-on sentence with no punctuation can exceed what Android TTS handles
   // reliably in one utterance — hard-split at word boundaries as a last resort.
   function hardSplit(text, max) {
@@ -367,6 +414,10 @@
   // false — the grace window keeps rule 1 airtight across that gap.
   var gen = 0, queue = [], playing = false, thinking = false, lastPlayEnd = 0;
   var GRACE_MS = 1200;
+  // Live-stream state: while a model reply streams in, the queue is fed
+  // incrementally. The voice runs far behind generation, so the queue doubles
+  // as a buffer that rides out short signal drops without going silent.
+  var streamOpen = false, waitingForData = false, slowAnnounced = false, waitTimer = null, liveAbort = null;
   function playItems(items) {
     if (!synth) { toast('No speech engine in this browser.'); return; }
     gen++;
@@ -379,7 +430,24 @@
   }
   function nextChunk(g) {
     if (g !== gen) return;
-    if (!queue.length) { playing = false; lastPlayEnd = Date.now(); render(); return; }
+    if (!queue.length) {
+      if (streamOpen) {
+        // the voice caught up with a still-open stream: wait for more text, and
+        // if the wait drags on, SAY so instead of going silently quiet
+        waitingForData = true;
+        clearTimeout(waitTimer);
+        waitTimer = setTimeout(function () {
+          if (waitingForData && streamOpen && g === gen && !slowAnnounced) {
+            slowAnnounced = true;
+            queue.push({ seg: null, text: 'The signal is slow right now. I will keep reading as soon as it comes back.' });
+            waitingForData = false;
+            nextChunk(g);
+          }
+        }, 6000);
+        return;
+      }
+      playing = false; lastPlayEnd = Date.now(); render(); return;
+    }
     var it = queue.shift();
     if (it.seg != null && S) { S.pos = it.seg; saveState(); }
     renderNow(it);
@@ -394,8 +462,33 @@
     gen++; queue = [];
     if (playing) lastPlayEnd = Date.now();
     playing = false;
+    streamOpen = false; waitingForData = false; clearTimeout(waitTimer);
+    if (liveAbort) { try { liveAbort('user'); } catch (e) {} }
     try { if (synth) synth.cancel(); } catch (e) {}
     render();
+  }
+  // Live session API used by the streaming model call.
+  function beginLiveSession() {
+    gen++;
+    var g = gen;
+    queue = [];
+    try { if (synth) synth.cancel(); } catch (e) {}
+    playing = true; thinking = false;
+    streamOpen = true; waitingForData = false; slowAnnounced = false;
+    acquireWake(); render();
+    setTimeout(function () { nextChunk(g); }, 150);
+    return g;
+  }
+  function pushLive(g, items) {
+    if (g !== gen) return;
+    for (var i = 0; i < items.length; i++) queue.push(items[i]);
+    slowAnnounced = false;
+    if (waitingForData) { waitingForData = false; clearTimeout(waitTimer); nextChunk(g); }
+  }
+  function endLiveStream(g) {
+    streamOpen = false;
+    if (g !== gen) return;
+    if (waitingForData) { waitingForData = false; clearTimeout(waitTimer); nextChunk(g); }
   }
   // Chrome sometimes silently pauses long sessions — nudge it.
   setInterval(function () { try { if (synth && playing && synth.paused) synth.resume(); } catch (e) {} }, 3000);
@@ -515,6 +608,8 @@
     '',
     'Reply with EXACTLY ONE JSON object and nothing else:',
     '{"say": string, "read_from": int or null, "read_to": int or null, "read_text": string or null, "goto": int or null, "note": string or null}',
+    'Always output the fields in exactly this order: say, read_from, read_to, read_text, goto, note',
+    '(the app streams your reply and starts speaking say and read_text while you are still writing).',
     '',
     '- say: short spoken reply. Plain conversational sentences. No markdown, no symbols, no lists.',
     '  Empty string if nothing needs saying.',
@@ -604,6 +699,7 @@
   }
 
   function callLLM(userText, sid) {
+    if (liveAbort) { try { liveAbort('replaced'); } catch (e) {} }
     thinking = true; render();
     var msgs = [{ role: 'system', content: SYS }];
     var hist = S.chat.slice(-11, -1);   // prior turns; the newest user turn goes in with context
@@ -613,18 +709,156 @@
       else if (h.raw) msgs.push({ role: 'assistant', content: h.raw });   // replay the model's JSON, never our summaries or error lines
     }
     msgs.push({ role: 'user', content: buildContext(userText) });
-    var body = { model: CFG.model, messages: msgs, temperature: 0.2, max_tokens: 3400 };
+    var body = { model: CFG.model, messages: msgs, temperature: 0.2, max_tokens: 3400, stream: true };
     if (CFG.pin) body.provider = { order: ['deepseek'], allow_fallbacks: false };
+
     var ctl = ('AbortController' in window) ? new AbortController() : null;
-    var kill = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 90000) : null;
+    var stopReason = '';
+    liveAbort = function (why) { stopReason = why || 'user'; if (ctl) { try { ctl.abort(); } catch (e) {} } };
+
+    // Streaming state. The voice runs far behind generation, so the chunk queue
+    // buffers several sentences ahead — short signal drops play through silently.
+    var acc = '', sseBuf = '', streamErr = '';
+    var lastByte = Date.now(), started = Date.now();
+    var sayTap = makeTap('say'), rtTap = makeTap('read_text');
+    var lg = null, anyLive = false, sayDone = false, rtEmitted = 0;
+    var f = null, t = null, srcLen = 1;
+    var watch = setInterval(function () {
+      if (Date.now() - lastByte > 25000 || Date.now() - started > 300000) {
+        streamErr = streamErr || 'stalled';
+        if (ctl) { try { ctl.abort(); } catch (e) {} }
+      }
+    }, 3000);
+    function cleanup() { clearInterval(watch); liveAbort = null; }
+
+    function ensureLive() {
+      if (lg == null) { lg = beginLiveSession(); anyLive = true; }
+      return lg;
+    }
+    function resolveRange() {
+      if (f != null) return;
+      var mf = acc.match(/"read_from"\s*:\s*(\d+)/);
+      var mt = acc.match(/"read_to"\s*:\s*(\d+)/);
+      f = mf ? clamp(parseInt(mf[1], 10) - 1, 0, Math.max(0, SEGS.length - 1)) : Math.max(0, (S && S.pos >= 0) ? S.pos : 0);
+      t = mt ? clamp(parseInt(mt[1], 10) - 1, f, Math.max(0, SEGS.length - 1)) : Math.max(f, SEGS.length - 1);
+      srcLen = 1;
+      for (var k = f; k <= t && k < SEGS.length; k++) srcLen += SEGS[k].length;
+      if (S) { S.lastFrom = f; S.lastTo = t; saveState(); }
+    }
+    function emitPiece(piece) {
+      if (!piece) return;
+      resolveRange();
+      var chs = ttsChunks(piece, null);
+      var frac = Math.min(1, rtEmitted / srcLen);
+      var seg = Math.min(t, f + Math.floor(frac * (t - f + 1)));
+      for (var k = 0; k < chs.length; k++) { chs[k].seg = seg; chs[k].alt = true; }
+      pushLive(ensureLive(), chs);
+    }
+    function drainRt(final) {
+      if (!rtTap.started) return;
+      var pend = rtTap.text.slice(rtEmitted);
+      for (;;) {
+        var piece = null;
+        var mm = /[.!?…]["')\]]*\s/.exec(pend);
+        if (mm) piece = pend.slice(0, mm.index + mm[0].length);
+        else if (final && pend.trim()) piece = pend;
+        else if (pend.length > 320) {
+          piece = pend.slice(0, 220);
+          var sp = piece.lastIndexOf(' ');
+          if (sp > 110) piece = piece.slice(0, sp + 1);
+        }
+        if (piece == null || !piece.length) break;
+        emitPiece(piece.trim());
+        rtEmitted += piece.length;
+        pend = pend.slice(piece.length);
+        if (final && !pend.trim()) break;
+      }
+    }
+    function feedTaps(final) {
+      sayTap.feed(acc);
+      if (sayTap.closed && !sayDone) {
+        sayDone = true;
+        var sTxt = (sayTap.text || '').trim();
+        if (sTxt) pushLive(ensureLive(), ttsChunks(sTxt, null));
+      }
+      rtTap.feed(acc);
+      drainRt(final && rtTap.closed);
+    }
+    function consumeSSE(txt) {
+      sseBuf += txt;
+      var nl;
+      while ((nl = sseBuf.indexOf('\n')) >= 0) {
+        var line = sseBuf.slice(0, nl).replace(/\r$/, '');
+        sseBuf = sseBuf.slice(nl + 1);
+        if (line.indexOf('data: ') !== 0) continue;
+        var payload = line.slice(6);
+        if (payload === '[DONE]') continue;
+        var jd = null;
+        try { jd = JSON.parse(payload); } catch (e) { continue; }
+        if (jd && jd.error) { streamErr = jd.error.message || 'provider error'; if (ctl) { try { ctl.abort(); } catch (e2) {} } return; }
+        var delta = '';
+        try { delta = jd.choices[0].delta.content || ''; } catch (e) { delta = ''; }
+        if (delta) acc += delta;
+      }
+      feedTaps(false);
+    }
     function fail(spoken, logText) {
-      if (kill) clearTimeout(kill);
+      cleanup();
       thinking = false;
       restoreDraftFor(sid, userText);
       pushChatFor(sid, { role: 'assistant', text: logText, ts: Date.now() });   // no .raw, so it is never replayed to the model
       render();
       speakShort(spoken + ' Your words are kept in the draft. Say ' + W.commit + ' to try again.');
     }
+    function streamCut(reasonText) {
+      cleanup();
+      thinking = false;
+      pushChatFor(sid, { role: 'assistant', text: '[stream cut: ' + reasonText + ']', ts: Date.now() });
+      if (lg != null) {
+        pushLive(lg, [{ seg: null, text: 'That is where the signal cut out. Say, keep going, when you are back in coverage, and I will continue from that spot.' }]);
+        endLiveStream(lg);
+      }
+      render();
+    }
+    function finish() {
+      cleanup();
+      feedTaps(true);
+      thinking = false;
+      var out = extractJson(acc);
+      if (!out) {
+        if (anyLive) { pushChatFor(sid, { role: 'assistant', text: '[spoke streamed reply]', ts: Date.now() }); endLiveStream(lg); render(); return; }
+        var mSay = acc.match(/"say"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (mSay) { try { out = { say: JSON.parse('"' + mSay[1] + '"') }; } catch (e) { out = { say: mSay[1] }; } }
+        else if (/^\s*[`{\[]/.test(acc)) { fail('The model reply came back garbled.', '[error] unparseable reply'); return; }
+        else if (acc.trim()) out = { say: acc.slice(0, 600), read_from: null, read_to: null, goto: null, note: null };
+        else { fail('The model returned an empty reply.', '[error] empty reply'); return; }
+      }
+      if (anyLive) {
+        // everything audible already streamed; do the bookkeeping, then any verbatim read
+        var summary = out.say || '';
+        if (out.note) { addNote(String(out.note), (sid === ACTIVE && S && S.pos >= 0) ? S.pos : null, sid); summary = summary || 'Noted.'; }
+        var from2 = toInt(out.read_from), to2 = toInt(out.read_to), go2 = toInt(out.goto);
+        var hadRt = rtTap.started && rtEmitted > 0;
+        if (from2 != null) summary += (summary ? ' ' : '') + '[reads ' + from2 + (to2 != null ? '-' + to2 : '-end') + (hadRt ? ', rewritten' : ', as written') + ']';
+        var raw2 = '';
+        try { raw2 = JSON.stringify({ say: out.say || '', read_from: from2, read_to: to2, goto: go2, note: out.note || null, read_text: hadRt ? '[rewrote the section for listening]' : null }); } catch (e) { raw2 = ''; }
+        pushChatFor(sid, { role: 'assistant', text: summary || '[no action]', raw: raw2, ts: Date.now() });
+        if (sid === ACTIVE && S) {
+          if (from2 != null && !hadRt) {
+            // the model chose verbatim (long section): append the raw segments to this session
+            var vf = clamp(from2 - 1, 0, Math.max(0, SEGS.length - 1));
+            var vt = (to2 != null) ? clamp(to2 - 1, vf, SEGS.length - 1) : SEGS.length - 1;
+            S.lastFrom = vf; S.lastTo = vt; saveState();
+            pushLive(lg, rangeItems(vf, vt));
+          } else if (go2 != null && from2 == null) { S.pos = clamp(go2 - 1, 0, Math.max(0, SEGS.length - 1)); saveState(); }
+        } else if (sid !== ACTIVE) { toast('Reply arrived for the other script — note filed, actions dropped.'); }
+        endLiveStream(lg);
+        render();
+        return;
+      }
+      handleOut(out, sid, acc);
+    }
+
     fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -635,30 +869,33 @@
       body: JSON.stringify(body),
       signal: ctl ? ctl.signal : undefined,
     }).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; });
-    }).then(function (res) {
-      if (kill) clearTimeout(kill);
-      if (!res.ok) {
-        var em = (res.j && res.j.error && res.j.error.message) ? res.j.error.message : ('HTTP ' + res.status);
-        fail('The model call failed. ' + em + '.', '[error] ' + em);
-        return;
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          var em = (j && j.error && j.error.message) ? j.error.message : ('HTTP ' + r.status);
+          fail('The model call failed. ' + em + '.', '[error] ' + em);
+        });
       }
-      var content = '';
-      try { content = res.j.choices[0].message.content || ''; } catch (e) {}
-      content = String(content);
-      if (!content.trim()) { fail('The model returned an empty reply.', '[error] empty reply'); return; }
-      var out = extractJson(content);
-      if (!out) {
-        // salvage a broken JSON reply: pull the say text out; else if it is prose, speak it
-        var mSay = content.match(/"say"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-        if (mSay) { try { out = { say: JSON.parse('"' + mSay[1] + '"') }; } catch (e) { out = { say: mSay[1] }; } }
-        else if (/^\s*[`{\[]/.test(content)) { fail('The model reply came back garbled.', '[error] unparseable reply'); return; }
-        else out = { say: content.slice(0, 600), read_from: null, read_to: null, goto: null, note: null };
+      lastByte = Date.now();
+      if (r.body && r.body.getReader) {
+        var reader = r.body.getReader();
+        var dec = new TextDecoder();
+        function pump() {
+          return reader.read().then(function (step) {
+            if (step.done) { finish(); return; }
+            lastByte = Date.now();
+            consumeSSE(dec.decode(step.value, { stream: true }));
+            return pump();
+          });
+        }
+        return pump();
       }
-      thinking = false;
-      handleOut(out, sid, content);
+      // no streaming support: read the whole SSE body at once, same parser
+      return r.text().then(function (all) { consumeSSE(all); finish(); });
     }).catch(function (e) {
-      fail('Could not reach the model.', '[error] network');
+      if (stopReason) { cleanup(); thinking = false; pushChatFor(sid, { role: 'assistant', text: '[stopped]', ts: Date.now() }); render(); return; }
+      if (anyLive) { streamCut(streamErr || 'signal lost'); return; }
+      if (streamErr && streamErr !== 'stalled') { fail('The model call failed. ' + streamErr + '.', '[error] ' + streamErr); return; }
+      fail('Could not reach the model.', '[error] ' + (streamErr || 'network'));
     });
   }
 
