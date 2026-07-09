@@ -1,6 +1,6 @@
 // Cache-first app shell so the page opens in warehouse dead zones with the PC off.
 // API calls (openrouter.ai) are cross-origin and pass straight through untouched.
-var CACHE = 'pocket-reader-v1';
+var CACHE = 'pocket-reader-v2';
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE)

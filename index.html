@@ -514,26 +514,39 @@
     'Interpret intent generously.',
     '',
     'Reply with EXACTLY ONE JSON object and nothing else:',
-    '{"say": string, "read_from": int or null, "read_to": int or null, "goto": int or null, "note": string or null}',
+    '{"say": string, "read_from": int or null, "read_to": int or null, "read_text": string or null, "goto": int or null, "note": string or null}',
     '',
     '- say: short spoken reply. Plain conversational sentences. No markdown, no symbols, no lists.',
     '  Empty string if nothing needs saying.',
-    '- read_from / read_to: 1-based segment numbers from the CONTEXT. Setting them makes the app read',
-    '  that range aloud after saying "say". read_to null with read_from set means read to the end.',
+    '- read_from / read_to: 1-based segment numbers from the CONTEXT. Setting read_from makes the app',
+    '  read that range aloud after saying "say". read_to null with read_from set means read to the end.',
+    '- read_text: the LISTENING REWRITE of the chosen range — see THE REWRITE RULE below.',
     '- goto: move the current position without reading anything.',
     '- note: when the user gives a comment, critique, observation, or asks to note something down,',
     '  put the cleaned-up note text here (keep their meaning and wording, drop the filler and the',
     '  mis-transcriptions). Confirm briefly in say. Otherwise null.',
     '',
+    'THE REWRITE RULE (the whole point of this app):',
+    'The source is written for the EYE — bullet points, shot notation, camera directions, labels,',
+    'fragments. Read verbatim by a voice, it is incomprehensible. So whenever you set read_from:',
+    '- If the chosen range is about 500 words or less, you MUST also fill read_text with a faithful',
+    '  re-voicing of that ENTIRE range as flowing natural spoken prose. Turn bullets and fragments',
+    '  into full sentences. Voice storyboard or visual notes as spoken description, for example',
+    '  "On screen, ...". Keep the original order and every piece of information — this is a',
+    '  re-wording for the ear, NEVER a summary. Do not add commentary. Do not shorten.',
+    '- If the range is clearly longer than about 500 words, set read_text to null so the app reads',
+    '  the original as written, and warn in say, like: "That section is long, so I am reading it as written."',
+    '- The app speaks read_text when present, otherwise the raw segments.',
+    '',
     'Navigation rules:',
-    '- "repeat that" or similar: re-read the last read range from CONTEXT.',
+    '- "repeat that" or similar: re-read the last read range from CONTEXT (the rewrite rule applies again).',
     '- "start over" / "from the top": read_from 1.',
     '- "keep going" / "continue" / "next": read on from position + 1 (or the position segment if it was cut off).',
     '- "read the part where X": find the matching segments by MEANING; exact wording will not match.',
     '- "read segment 4" / "paragraph 4": read_from 4, read_to 4.',
     '- Questions about the script: answer briefly in say; only read segments when asked.',
     '- If the transcript was clearly not meant for you (talking to another person, stray chatter),',
-    '  return {"say":"","read_from":null,"read_to":null,"goto":null,"note":null}.',
+    '  return {"say":"","read_from":null,"read_to":null,"read_text":null,"goto":null,"note":null}.',
     '- Never use segment numbers outside 1..N.',
   ].join('\n');
 
@@ -600,7 +613,7 @@
       else if (h.raw) msgs.push({ role: 'assistant', content: h.raw });   // replay the model's JSON, never our summaries or error lines
     }
     msgs.push({ role: 'user', content: buildContext(userText) });
-    var body = { model: CFG.model, messages: msgs, temperature: 0.2, max_tokens: 2000 };
+    var body = { model: CFG.model, messages: msgs, temperature: 0.2, max_tokens: 3400 };
     if (CFG.pin) body.provider = { order: ['deepseek'], allow_fallbacks: false };
     var ctl = ('AbortController' in window) ? new AbortController() : null;
     var kill = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 90000) : null;
@@ -656,9 +669,11 @@
       summary = summary || 'Noted.';
     }
     var from = toInt(out.read_from), to = toInt(out.read_to), go = toInt(out.goto);
-    if (from != null) summary += (summary ? ' ' : '') + '[reads ' + from + (to != null ? '-' + to : '-end') + ']';
+    var readText = (typeof out.read_text === 'string' && out.read_text.trim()) ? out.read_text.trim() : null;
+    if (from != null) summary += (summary ? ' ' : '') + '[reads ' + from + (to != null ? '-' + to : '-end') + (readText ? ', rewritten' : ', as written') + ']';
     var raw = '';
-    try { raw = JSON.stringify({ say: out.say || '', read_from: from, read_to: to, goto: go, note: out.note || null }); }
+    // keep replayed history lean: the full rewrite text never goes back to the model
+    try { raw = JSON.stringify({ say: out.say || '', read_from: from, read_to: to, goto: go, note: out.note || null, read_text: readText ? '[rewrote the section for listening]' : null }); }
     catch (e) { raw = String(rawContent || '').slice(0, 800); }
     pushChatFor(sid, { role: 'assistant', text: summary || '[no action]', raw: raw, ts: Date.now() });
     if (sid !== ACTIVE || !S) {
@@ -669,7 +684,21 @@
       return;
     }
     if (from != null) {
-      readRange(from - 1, to != null ? to - 1 : null, out.say || '');
+      var f = clamp(from - 1, 0, Math.max(0, SEGS.length - 1));
+      var t = (to != null) ? clamp(to - 1, f, Math.max(0, SEGS.length - 1)) : SEGS.length - 1;
+      if (readText) {
+        // speak the model's ear-friendly rewrite; spread position markers across the
+        // range so "where am i" and "continue" still track the SOURCE segments
+        S.lastFrom = f; S.lastTo = t; saveState();
+        var chunks = ttsChunks(readText, null);
+        for (var ci = 0; ci < chunks.length; ci++) {
+          chunks[ci].seg = Math.min(t, f + Math.floor((ci / chunks.length) * (t - f + 1)));
+          chunks[ci].alt = true;
+        }
+        playItems((out.say ? ttsChunks(String(out.say), null) : []).concat(chunks));
+      } else {
+        readRange(f, t, out.say || '');
+      }
     } else {
       if (go != null) { S.pos = clamp(go - 1, 0, Math.max(0, SEGS.length - 1)); saveState(); }
       if (out.say) speakShort(out.say);
@@ -756,8 +785,8 @@
     $('nowTitle').textContent = sc.title;
     $('nowState').textContent = playing ? (thinking ? 'reading · thinking' : 'reading') : (thinking ? 'thinking' : 'idle');
     if (it && it.seg != null) {
-      $('nowPos').textContent = 'Segment ' + (it.seg + 1) + ' of ' + SEGS.length;
-      $('nowText').textContent = SEGS[it.seg] || '';
+      $('nowPos').textContent = 'Segment ' + (it.seg + 1) + ' of ' + SEGS.length + (it.alt ? ' · rewritten for listening' : '');
+      $('nowText').textContent = it.alt ? it.text : (SEGS[it.seg] || '');
     } else if (S && S.pos >= 0) {
       $('nowPos').textContent = 'Segment ' + (S.pos + 1) + ' of ' + SEGS.length;
       $('nowText').textContent = SEGS[S.pos] || '';
