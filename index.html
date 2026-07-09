@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#0b0f14" />
+<link rel="manifest" href="manifest.json" />
+<title>Pocket Reader</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#131a22; --line:#243140; --txt:#e6edf3; --dim:#8aa0b3; --accent:#10b981; --accent2:#2563eb; --warn:#f59e0b; --err:#ef4444; --note:#8b5cf6; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; min-height:100%; background:var(--bg); color:var(--txt); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  body { display:flex; flex-direction:column; max-width:560px; margin:0 auto; padding:12px 14px 24px; gap:11px; }
+  header { display:flex; align-items:center; justify-content:space-between; }
+  h1 { font-size:16px; margin:0; font-weight:600; letter-spacing:.3px; }
+  .badge { font-size:11px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:3px 9px; }
+  .tabs { display:flex; gap:6px; }
+  .tab { flex:1; text-align:center; font-size:13px; font-weight:600; color:var(--dim); background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 4px; }
+  .tab.on { color:var(--txt); border-color:var(--accent2); background:#16202c; }
+  .banner { font-size:12px; line-height:1.45; background:#2a1f08; border:1px solid #5a431a; color:#f6d68a; border-radius:10px; padding:9px 11px; }
+  .mic-wrap { display:flex; flex-direction:column; align-items:center; gap:9px; padding:6px 0 0; }
+  #mic { width:120px; height:120px; border-radius:50%; border:none; background:var(--accent2); color:#fff; font-size:15px; font-weight:600;
+         box-shadow:0 8px 30px rgba(37,99,235,.35); transition:transform .08s ease, background .2s ease; }
+  #mic:active { transform:scale(.96); }
+  #mic.listening { background:#047857; animation:pulse 2.4s infinite; }
+  #mic.reading { background:var(--accent); animation:pulse 1.6s infinite; }
+  #mic.thinking { background:var(--warn); }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(255,255,255,.28)} 70%{box-shadow:0 0 0 18px rgba(255,255,255,0)} 100%{box-shadow:0 0 0 0 rgba(255,255,255,0)} }
+  #status { font-size:13px; color:var(--dim); min-height:18px; text-align:center; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:11px 13px; }
+  .label { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--dim); margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .label .mini { text-transform:none; letter-spacing:0; font-size:11px; color:var(--dim); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-size:12px; color:var(--dim); background:#0b1219; border:1px solid var(--line); border-radius:999px; padding:6px 11px; }
+  .chip b { color:var(--txt); font-weight:600; }
+  #nowText { font-size:15px; line-height:1.55; white-space:pre-wrap; max-height:30vh; overflow:auto; }
+  #nowPos { font-size:12px; color:var(--dim); margin-bottom:5px; }
+  #draftText { font-size:14px; line-height:1.5; white-space:pre-wrap; max-height:22vh; overflow:auto; min-height:18px; }
+  .draftcard { border-color:#3a4b60; }
+  .draftcard.live { border-color:var(--note); }
+  #chatLog { display:flex; flex-direction:column; gap:8px; max-height:34vh; overflow:auto; }
+  .turn { font-size:13px; line-height:1.45; white-space:pre-wrap; border-left:3px solid var(--line); padding:2px 0 2px 9px; }
+  .turn.you { border-color:var(--accent2); }
+  .turn.ai { border-color:var(--accent); color:#cfe8dd; }
+  .turn .who { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim); display:block; margin-bottom:2px; }
+  .row { display:flex; gap:8px; }
+  .row > * { min-width:0; }
+  input[type=text], input[type=password], textarea, select { flex:1; width:100%; background:#0b1219; border:1px solid var(--line); color:var(--txt); border-radius:10px; padding:10px 12px; font-size:15px; font-family:inherit; }
+  textarea { min-height:130px; resize:vertical; line-height:1.45; }
+  input:focus, textarea:focus, select:focus { outline:none; border-color:var(--accent2); }
+  button.act { background:#1c2733; border:1px solid var(--line); color:var(--txt); border-radius:10px; padding:10px 14px; font-size:14px; font-weight:600; white-space:nowrap; }
+  button.act:active { background:#243140; }
+  button.act.primary { background:var(--accent2); border-color:var(--accent2); color:#fff; }
+  button.act.danger { color:#f3b1b1; border-color:#5b2b2b; }
+  .list { display:flex; flex-direction:column; gap:8px; }
+  .item { background:#0b1219; border:1px solid var(--line); border-radius:10px; padding:9px 11px; display:flex; align-items:center; gap:9px; }
+  .item.on { border-color:var(--accent); }
+  .item .grow { flex:1; min-width:0; }
+  .item .t { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .s { font-size:11px; color:var(--dim); margin-top:2px; }
+  .item .body { font-size:13px; line-height:1.45; white-space:pre-wrap; color:var(--txt); }
+  .item button { flex:none; }
+  .kv { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .kv .k { font-size:12px; color:var(--dim); }
+  .toggle { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--dim); }
+  .pane { display:none; flex-direction:column; gap:11px; }
+  .pane.on { display:flex; }
+  footer { font-size:11px; color:var(--dim); text-align:center; padding-top:4px; line-height:1.5; }
+  #pocket { position:fixed; inset:0; background:#000; z-index:99; display:none; }
+  #pocket .hint { position:absolute; bottom:26px; left:0; right:0; text-align:center; color:#222; font-size:12px; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:#1c2733; border:1px solid var(--line); color:var(--txt); font-size:13px; border-radius:999px; padding:8px 16px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:100; max-width:86vw; }
+  #toast.on { opacity:1; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Pocket Reader</h1>
+    <span class="badge" id="net">…</span>
+  </header>
+
+  <div class="tabs">
+    <div class="tab on" data-pane="paneRead">Read</div>
+    <div class="tab" data-pane="paneScripts">Scripts</div>
+    <div class="tab" data-pane="paneNotes">Notes</div>
+    <div class="tab" data-pane="paneSettings">Settings</div>
+  </div>
+
+  <div class="banner" id="warnBanner" style="display:none"></div>
+
+  <!-- ══════════ READ ══════════ -->
+  <div class="pane on" id="paneRead">
+    <div class="mic-wrap">
+      <button id="mic">Start voice</button>
+      <div id="status">Tap the circle to start.</div>
+    </div>
+
+    <div class="chips" id="wordChips"></div>
+
+    <div class="card" id="nowCard" style="display:none">
+      <div class="label"><span id="nowTitle">Script</span><span class="mini" id="nowState"></span></div>
+      <div id="nowPos">—</div>
+      <div id="nowText"></div>
+    </div>
+
+    <div class="card draftcard" id="draftCard">
+      <div class="label"><span>Draft — not sent yet</span><span class="mini" id="draftCount"></span></div>
+      <div id="draftText"></div>
+    </div>
+
+    <div class="card" id="chatCard" style="display:none">
+      <div class="label"><span>Conversation</span><button class="act" id="clearChat" style="padding:4px 10px;font-size:11px">clear</button></div>
+      <div id="chatLog"></div>
+    </div>
+
+    <div class="row">
+      <input id="typed" type="text" placeholder="…or type instead of talking" autocomplete="off" />
+      <button class="act" id="typedSend">Send</button>
+    </div>
+    <div class="row">
+      <button class="act" id="btnStart">Read from start</button>
+      <button class="act" id="btnContinue">Continue</button>
+      <button class="act" id="btnStop">Stop</button>
+      <button class="act" id="btnPocket">Pocket</button>
+    </div>
+    <footer>Screen must stay on for the mic and the voice — use Pocket to black it out in your pocket.<br/>Reading and notes work offline; sending to the model needs signal.</footer>
+  </div>
+
+  <!-- ══════════ SCRIPTS ══════════ -->
+  <div class="pane" id="paneScripts">
+    <div class="card">
+      <div class="label"><span>Add a script</span></div>
+      <div class="kv"><input id="scTitle" type="text" placeholder="Title (e.g. Warrior v2)" autocomplete="off" /></div>
+      <div class="kv"><textarea id="scText" placeholder="Paste the script / storyboard here — any format, rough is fine."></textarea></div>
+      <div class="row"><button class="act primary" id="scAdd">Add and select</button></div>
+    </div>
+    <div class="card">
+      <div class="label"><span>Your scripts</span></div>
+      <div class="list" id="scList"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ NOTES ══════════ -->
+  <div class="pane" id="paneNotes">
+    <div class="card">
+      <div class="label"><span>Notes</span><span class="mini" id="noteCount"></span></div>
+      <div class="row" style="margin-bottom:10px">
+        <button class="act" id="noteCopy">Copy all</button>
+        <button class="act" id="noteDl">Download</button>
+        <button class="act danger" id="noteClear">Clear script's</button>
+      </div>
+      <div class="list" id="noteList"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ SETTINGS ══════════ -->
+  <div class="pane" id="paneSettings">
+    <div class="card">
+      <div class="label"><span>OpenRouter</span></div>
+      <div class="kv"><span class="k">API key — stays on this phone, only ever sent to openrouter.ai</span>
+        <div class="row"><input id="setKey" type="password" placeholder="sk-or-…" autocomplete="off" /><button class="act" id="keyEye">show</button></div>
+      </div>
+      <div class="kv"><span class="k">Model</span><input id="setModel" type="text" autocomplete="off" /></div>
+      <label class="toggle"><input type="checkbox" id="setPin" /> Only use DeepSeek as the provider (no fallbacks)</label>
+    </div>
+    <div class="card">
+      <div class="label"><span>Spoken keywords</span></div>
+      <div class="kv"><span class="k">Send the draft to the model</span><input id="setWCommit" type="text" autocomplete="off" /></div>
+      <div class="kv"><span class="k">Delete the draft (unsent)</span><input id="setWDel" type="text" autocomplete="off" /></div>
+      <div class="kv"><span class="k">Stop the voice while it reads</span><input id="setWStop" type="text" autocomplete="off" /></div>
+    </div>
+    <div class="card">
+      <div class="label"><span>Voice</span></div>
+      <div class="kv"><span class="k">Voice</span><select id="setVoice"></select></div>
+      <div class="kv"><span class="k">Speed: <span id="rateShow">1.0</span></span><input id="setRate" type="range" min="0.7" max="1.4" step="0.05" /></div>
+      <div class="row"><button class="act" id="voiceTest">Test voice</button></div>
+    </div>
+    <div class="card">
+      <div class="label"><span>Storage</span><span class="mini" id="storState"></span></div>
+      <div class="row">
+        <button class="act" id="bkDl">Backup everything</button>
+        <button class="act" id="bkUpBtn">Restore backup</button>
+        <input id="bkUp" type="file" accept="application/json" style="display:none" />
+      </div>
+    </div>
+  </div>
+
+  <div id="pocket"><div class="hint">triple-tap anywhere to exit</div></div>
+  <div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  function $(id) { return document.getElementById(id); }
+
+  // ───────────────────────── storage ─────────────────────────
+  // Everything lives in localStorage on the phone. Nothing depends on any server;
+  // the only network calls are to openrouter.ai when the user sends a draft.
+  function lsGet(k, dflt) { try { var v = localStorage.getItem(k); return v == null ? dflt : v; } catch (e) { return dflt; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function jGet(k, dflt) { try { var v = localStorage.getItem(k); return v == null ? dflt : (JSON.parse(v) != null ? JSON.parse(v) : dflt); } catch (e) { return dflt; } }
+  function jSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  var CFG = {
+    key: lsGet('pr.key', ''),
+    model: lsGet('pr.model', 'deepseek/deepseek-v4-pro'),
+    pin: lsGet('pr.pin', '1') === '1',
+    voiceName: lsGet('pr.voiceName', ''),
+    rate: parseFloat(lsGet('pr.rate', '1')) || 1,
+  };
+  var W = jGet('pr.words', null) || { commit: 'execute', del: 'delete delete', stop: 'stop stop' };
+  var SCRIPTS = jGet('pr.scripts', []);          // [{id,title,text,ts,segs:[...]}]
+  var NOTES = jGet('pr.notes', []);              // [{id,sid,ts,seg,text}]
+  var ACTIVE = lsGet('pr.active', '');
+  var S = null;                                   // per-script state, loaded by loadState()
+  var SEGS = [];                                  // active script's segments
+
+  function stateKey(id) { return 'pr.state.' + id; }
+  function loadState() {
+    var sc = activeScript();
+    SEGS = sc ? sc.segs : [];
+    S = sc ? (jGet(stateKey(sc.id), null) || { pos: -1, lastFrom: -1, lastTo: -1, chat: [], draft: '' }) : null;
+  }
+  function saveState() { var sc = activeScript(); if (sc && S) jSet(stateKey(sc.id), S); }
+  function activeScript() {
+    for (var i = 0; i < SCRIPTS.length; i++) if (SCRIPTS[i].id === ACTIVE) return SCRIPTS[i];
+    return null;
+  }
+  function uid() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  // ───────────────────────── pure helpers ─────────────────────────
+  function norm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  function toInt(v) { var n = parseInt(v, 10); return isNaN(n) ? null : n; }
+
+  // A spoken phrase → regex that tolerates punctuation/casing between and around words.
+  function phraseAnyRe(phrase) {
+    var p = norm(phrase).split(' ').map(escRe).join('[\\s,.!?;:]+');
+    return new RegExp('(?:^|[\\s,.!?;:])' + p + '(?:[\\s,.!?;:]|$)', 'i');
+  }
+  function phraseEndRe(phrase) {
+    var p = norm(phrase).split(' ').map(escRe).join('[\\s,.!?;:]+');
+    return new RegExp('(?:^|[\\s,.!?;:])' + p + '[\\s,.!?;:]*$', 'i');
+  }
+
+  // Split a pasted script (ANY rough format) into readable, numberable segments.
+  function sentencePieces(text) {
+    var out = text.match(/[^.!?\n]+[.!?]+["')\]]*\s*|[^.!?\n]+$/g);
+    return out || [text];
+  }
+  function packPieces(pieces, max) {
+    var out = [], cur = '';
+    for (var i = 0; i < pieces.length; i++) {
+      var p = pieces[i].trim();
+      if (!p) continue;
+      if (cur && (cur.length + p.length + 1) > max) { out.push(cur); cur = p; }
+      else cur = cur ? cur + ' ' + p : p;
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  function segmentScript(text) {
+    var t = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (!t) return [];
+    var blocks = t.split(/\n\s*\n+/);
+    if (blocks.length === 1 && t.split('\n').length >= 6) {
+      // single-newline formats: group lines into ~500-char chunks
+      blocks = packPieces(t.split('\n'), 500);
+    }
+    var segs = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var b = blocks[i].replace(/[ \t]*\n[ \t]*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      if (!b) continue;
+      if (b.length <= 700) segs.push(b);
+      else segs = segs.concat(packPieces(sentencePieces(b), 500));
+    }
+    return segs;
+  }
+
+  // First balanced {...} in a string → parsed object, or null.
+  function extractJson(s) {
+    s = String(s || '');
+    var start = s.indexOf('{');
+    while (start !== -1) {
+      var depth = 0, inStr = false, escd = false;
+      for (var i = start; i < s.length; i++) {
+        var c = s[i];
+        if (inStr) {
+          if (escd) escd = false;
+          else if (c === '\\') escd = true;
+          else if (c === '"') inStr = false;
+        } else if (c === '"') inStr = true;
+        else if (c === '{') depth++;
+        else if (c === '}') {
+          depth--;
+          if (depth === 0) {
+            try { return JSON.parse(s.slice(start, i + 1)); } catch (e) { break; }
+          }
+        }
+      }
+      start = s.indexOf('{', start + 1);
+    }
+    return null;
+  }
+
+  // A run-on sentence with no punctuation can exceed what Android TTS handles
+  // reliably in one utterance — hard-split at word boundaries as a last resort.
+  function hardSplit(text, max) {
+    var out = [], t = String(text).trim();
+    while (t.length > max) {
+      var cut = t.lastIndexOf(' ', max);
+      if (cut < max * 0.5) cut = max;
+      out.push(t.slice(0, cut).trim());
+      t = t.slice(cut).trim();
+    }
+    if (t) out.push(t);
+    return out;
+  }
+  function ttsChunks(text, seg) {
+    var pieces = packPieces(sentencePieces(String(text || '')), 220);
+    var out = [];
+    for (var i = 0; i < pieces.length; i++) {
+      var parts = pieces[i].length > 260 ? hardSplit(pieces[i], 220) : [pieces[i]];
+      for (var j = 0; j < parts.length; j++) out.push({ seg: seg, text: parts[j] });
+    }
+    return out;
+  }
+
+  // ───────────────────────── toast + status ─────────────────────────
+  var toastTimer = null;
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.className = 'on';
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.className = ''; }, 2600);
+  }
+
+  // ───────────────────────── voice out (speechSynthesis) ─────────────────────────
+  var synth = window.speechSynthesis || null;
+  var VOICES = [];
+  function loadVoices() {
+    if (!synth) return;
+    VOICES = synth.getVoices() || [];
+    var sel = $('setVoice'); sel.innerHTML = '';
+    var sorted = VOICES.slice().sort(function (a, b) {
+      var ae = /^en/i.test(a.lang) ? 0 : 1, be = /^en/i.test(b.lang) ? 0 : 1;
+      return ae - be || a.name.localeCompare(b.name);
+    });
+    var def = document.createElement('option');
+    def.value = ''; def.textContent = 'Default voice';
+    sel.appendChild(def);
+    for (var i = 0; i < sorted.length; i++) {
+      var o = document.createElement('option');
+      o.value = sorted[i].name; o.textContent = sorted[i].name + ' (' + sorted[i].lang + ')';
+      sel.appendChild(o);
+    }
+    sel.value = CFG.voiceName;
+    if (sel.value !== CFG.voiceName) sel.value = '';
+  }
+  function pickVoice() {
+    if (!CFG.voiceName) return null;
+    for (var i = 0; i < VOICES.length; i++) if (VOICES[i].name === CFG.voiceName) return VOICES[i];
+    return null;
+  }
+
+  // Reader engine: a queue of {seg,text} chunks; gen token kills zombie callbacks.
+  // lastPlayEnd: recognition finalizes transcripts up to ~1.5s AFTER the words were
+  // spoken, so speech that overlapped playback arrives after `playing` is already
+  // false — the grace window keeps rule 1 airtight across that gap.
+  var gen = 0, queue = [], playing = false, thinking = false, lastPlayEnd = 0;
+  var GRACE_MS = 1200;
+  function playItems(items) {
+    if (!synth) { toast('No speech engine in this browser.'); return; }
+    gen++;
+    var g = gen;
+    queue = items.slice();
+    try { synth.cancel(); } catch (e) {}
+    playing = true; render();
+    acquireWake();   // screen sleep kills TTS too, not just the mic
+    setTimeout(function () { nextChunk(g); }, 150);   // Android needs a beat after cancel()
+  }
+  function nextChunk(g) {
+    if (g !== gen) return;
+    if (!queue.length) { playing = false; lastPlayEnd = Date.now(); render(); return; }
+    var it = queue.shift();
+    if (it.seg != null && S) { S.pos = it.seg; saveState(); }
+    renderNow(it);
+    var u = new SpeechSynthesisUtterance(it.text);
+    var v = pickVoice(); if (v) u.voice = v;
+    u.rate = CFG.rate; u.lang = (v && v.lang) || 'en-US';
+    u.onend = function () { if (g === gen) nextChunk(g); };
+    u.onerror = function () { if (g === gen) nextChunk(g); };
+    try { synth.speak(u); } catch (e) { if (g === gen) nextChunk(g); }
+  }
+  function stopAll() {
+    gen++; queue = [];
+    if (playing) lastPlayEnd = Date.now();
+    playing = false;
+    try { if (synth) synth.cancel(); } catch (e) {}
+    render();
+  }
+  // Chrome sometimes silently pauses long sessions — nudge it.
+  setInterval(function () { try { if (synth && playing && synth.paused) synth.resume(); } catch (e) {} }, 3000);
+
+  function rangeItems(from, to) {
+    var items = [];
+    for (var i = from; i <= to && i < SEGS.length; i++) items = items.concat(ttsChunks(SEGS[i], i));
+    return items;
+  }
+  function readRange(from, to, preface) {
+    if (!SEGS.length) { speakShort('No script loaded. Add one in the Scripts tab.'); return; }
+    from = clamp(from, 0, SEGS.length - 1);
+    to = (to == null) ? SEGS.length - 1 : clamp(to, from, SEGS.length - 1);
+    S.lastFrom = from; S.lastTo = to; saveState();
+    var items = preface ? ttsChunks(preface, null) : [];
+    playItems(items.concat(rangeItems(from, to)));
+  }
+  function speakShort(text) { if (text) playItems(ttsChunks(String(text), null)); }
+
+  // ───────────────────────── mic (speech recognition) ─────────────────────────
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var session = false, rec = null, restartTimer = null, lastErr = '';
+  var wakeLock = null;
+  function acquireWake() {
+    try {
+      if (!(navigator.wakeLock && navigator.wakeLock.request)) return;
+      navigator.wakeLock.request('screen').then(function (l) {
+        wakeLock = l;
+        l.addEventListener('release', function () {
+          wakeLock = null;
+          // battery saver can revoke the lock — take it back while still needed
+          if ((session || playing) && document.visibilityState === 'visible') setTimeout(acquireWake, 400);
+        });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function releaseWake() { try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null; }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    if (session || playing) acquireWake();
+    if (session) armRecognition();
+  });
+
+  function startSession() {
+    if (!SR) { warn('This browser has no speech recognition — use Chrome on Android. Typing still works.'); return; }
+    session = true; acquireWake(); armRecognition(); render();
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  }
+  function stopSession() {
+    session = false; clearTimeout(restartTimer);
+    var r = rec; rec = null;
+    try { if (r) r.abort(); } catch (e) {}
+    releaseWake(); render();
+  }
+  function armRecognition() {
+    if (!session) return;
+    clearTimeout(restartTimer);
+    var old = rec; rec = null;
+    try { if (old) old.abort(); } catch (e) {}
+    var r = new SR(); rec = r;
+    r.lang = 'en-US'; r.interimResults = false; r.maxAlternatives = 1;
+    r.onresult = function (e) { try { onHeard(e.results[e.results.length - 1][0].transcript); } catch (err) {} };
+    r.onerror = function (e) {
+      lastErr = e.error || '';
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        session = false; render();
+        warn('Microphone blocked. Allow the mic for this site in Chrome, then start again.');
+      }
+    };
+    r.onend = function () {
+      if (session && rec === r) {
+        var delay = (lastErr === 'network') ? 1500 : 250;   // do not hammer STT in a dead zone
+        lastErr = '';
+        restartTimer = setTimeout(armRecognition, delay);
+      }
+    };
+    try { r.start(); } catch (e) { restartTimer = setTimeout(armRecognition, 700); }
+  }
+
+  // The three rules, exactly as specified:
+  // - While the voice is reading: ONLY the stop phrase does anything; all else ignored.
+  // - While idle: the delete phrase wipes the draft; the commit word sends it;
+  //   everything else accumulates into the draft. Nothing is auto-sent, ever.
+  function onHeard(raw) {
+    raw = String(raw || '').trim();
+    if (!raw) return;
+    // Transcripts finalize AFTER the words were spoken, so anything arriving while
+    // reading OR within the grace window after playback stopped was captured during
+    // playback — only the stop phrase counts there; everything else is discarded.
+    if (playing || (Date.now() - lastPlayEnd) < GRACE_MS) {
+      if (phraseAnyRe(W.stop).test(raw)) { stopAll(); toast('Stopped.'); }
+      return;
+    }
+    if (phraseAnyRe(W.del).test(raw)) {
+      if (S) { S.draft = ''; saveState(); }
+      render(); speakShort('Draft deleted.');
+      return;
+    }
+    var m = raw.match(phraseEndRe(W.commit));
+    if (m) {
+      var pre = raw.slice(0, m.index).trim();
+      if (pre && S) { S.draft = (S.draft ? S.draft + ' ' : '') + pre; saveState(); }
+      commit();
+      return;
+    }
+    if (!S) { toast('Add a script first (Scripts tab).'); return; }
+    S.draft = (S.draft ? S.draft + ' ' : '') + raw;
+    saveState(); render();
+  }
+
+  // ───────────────────────── the model call ─────────────────────────
+  var SYS = [
+    'You are the voice controller of a hands-free script reader. The user works a warehouse job,',
+    'listens through one earbud, and everything in your "say" field is spoken aloud by text-to-speech.',
+    'Their messages are rough speech transcripts: unreliable punctuation, occasional mis-heard words.',
+    'Interpret intent generously.',
+    '',
+    'Reply with EXACTLY ONE JSON object and nothing else:',
+    '{"say": string, "read_from": int or null, "read_to": int or null, "goto": int or null, "note": string or null}',
+    '',
+    '- say: short spoken reply. Plain conversational sentences. No markdown, no symbols, no lists.',
+    '  Empty string if nothing needs saying.',
+    '- read_from / read_to: 1-based segment numbers from the CONTEXT. Setting them makes the app read',
+    '  that range aloud after saying "say". read_to null with read_from set means read to the end.',
+    '- goto: move the current position without reading anything.',
+    '- note: when the user gives a comment, critique, observation, or asks to note something down,',
+    '  put the cleaned-up note text here (keep their meaning and wording, drop the filler and the',
+    '  mis-transcriptions). Confirm briefly in say. Otherwise null.',
+    '',
+    'Navigation rules:',
+    '- "repeat that" or similar: re-read the last read range from CONTEXT.',
+    '- "start over" / "from the top": read_from 1.',
+    '- "keep going" / "continue" / "next": read on from position + 1 (or the position segment if it was cut off).',
+    '- "read the part where X": find the matching segments by MEANING; exact wording will not match.',
+    '- "read segment 4" / "paragraph 4": read_from 4, read_to 4.',
+    '- Questions about the script: answer briefly in say; only read segments when asked.',
+    '- If the transcript was clearly not meant for you (talking to another person, stray chatter),',
+    '  return {"say":"","read_from":null,"read_to":null,"goto":null,"note":null}.',
+    '- Never use segment numbers outside 1..N.',
+  ].join('\n');
+
+  function buildContext(userText) {
+    var sc = activeScript();
+    var lines = ['CONTEXT', 'Script: ' + (sc ? sc.title : 'none'), 'Segments (1..' + SEGS.length + '):'];
+    for (var i = 0; i < SEGS.length; i++) lines.push((i + 1) + ': ' + SEGS[i]);
+    lines.push('');
+    lines.push('Position: ' + (S.pos >= 0 ? 'last played segment ' + (S.pos + 1) + ' of ' + SEGS.length : 'nothing played yet'));
+    lines.push('Last read range: ' + (S.lastFrom >= 0 ? (S.lastFrom + 1) + '-' + (S.lastTo + 1) : 'none'));
+    lines.push('Currently reading aloud: ' + (playing ? 'yes' : 'no'));
+    var myNotes = notesFor(ACTIVE);
+    lines.push('Saved notes on this script (' + myNotes.length + '):');
+    var recent = myNotes.slice(-25);
+    for (var j = 0; j < recent.length; j++) lines.push('- [seg ' + (recent[j].seg != null ? recent[j].seg + 1 : '?') + '] ' + recent[j].text);
+    lines.push('');
+    lines.push('USER SAID: ' + userText);
+    return lines.join('\n');
+  }
+
+  function commit() {
+    if (!S) { toast('Add a script first.'); return; }
+    var text = (S.draft || '').trim();
+    if (!text) { speakShort('Nothing to send.'); return; }
+    if (!CFG.key) { speakShort('No API key set. Open the settings tab.'); return; }
+    if (thinking) { speakShort('Still working on the last one.'); return; }
+    S.draft = ''; S.chat.push({ role: 'user', text: text, ts: Date.now() });
+    if (S.chat.length > 60) S.chat = S.chat.slice(-60);
+    saveState(); render();
+    callLLM(text, ACTIVE);
+  }
+
+  function scriptById(id) { for (var i = 0; i < SCRIPTS.length; i++) if (SCRIPTS[i].id === id) return SCRIPTS[i]; return null; }
+  // A failed send must NEVER cost the dictation: the draft is restored (merged in
+  // front of anything said since) so the commit word simply works again.
+  function restoreDraftFor(sid, text) {
+    if (!text) return;
+    if (sid === ACTIVE && S) { S.draft = text + (S.draft ? ' ' + S.draft : ''); saveState(); render(); return; }
+    if (!scriptById(sid)) return;
+    var st = jGet(stateKey(sid), null) || { pos: -1, lastFrom: -1, lastTo: -1, chat: [], draft: '' };
+    st.draft = text + (st.draft ? ' ' + st.draft : '');
+    jSet(stateKey(sid), st);
+  }
+  function pushChatFor(sid, entry) {
+    if (sid === ACTIVE && S) {
+      S.chat.push(entry);
+      if (S.chat.length > 60) S.chat = S.chat.slice(-60);
+      saveState(); return;
+    }
+    if (!scriptById(sid)) return;
+    var st = jGet(stateKey(sid), null) || { pos: -1, lastFrom: -1, lastTo: -1, chat: [], draft: '' };
+    st.chat.push(entry);
+    if (st.chat.length > 60) st.chat = st.chat.slice(-60);
+    jSet(stateKey(sid), st);
+  }
+
+  function callLLM(userText, sid) {
+    thinking = true; render();
+    var msgs = [{ role: 'system', content: SYS }];
+    var hist = S.chat.slice(-11, -1);   // prior turns; the newest user turn goes in with context
+    for (var i = 0; i < hist.length; i++) {
+      var h = hist[i];
+      if (h.role === 'user') msgs.push({ role: 'user', content: h.text });
+      else if (h.raw) msgs.push({ role: 'assistant', content: h.raw });   // replay the model's JSON, never our summaries or error lines
+    }
+    msgs.push({ role: 'user', content: buildContext(userText) });
+    var body = { model: CFG.model, messages: msgs, temperature: 0.2, max_tokens: 2000 };
+    if (CFG.pin) body.provider = { order: ['deepseek'], allow_fallbacks: false };
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var kill = ctl ? setTimeout(function () { try { ctl.abort(); } catch (e) {} }, 90000) : null;
+    function fail(spoken, logText) {
+      if (kill) clearTimeout(kill);
+      thinking = false;
+      restoreDraftFor(sid, userText);
+      pushChatFor(sid, { role: 'assistant', text: logText, ts: Date.now() });   // no .raw, so it is never replayed to the model
+      render();
+      speakShort(spoken + ' Your words are kept in the draft. Say ' + W.commit + ' to try again.');
+    }
+    fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + CFG.key,
+        'Content-Type': 'application/json',
+        'X-OpenRouter-Title': 'Pocket Reader',
+      },
+      body: JSON.stringify(body),
+      signal: ctl ? ctl.signal : undefined,
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; });
+    }).then(function (res) {
+      if (kill) clearTimeout(kill);
+      if (!res.ok) {
+        var em = (res.j && res.j.error && res.j.error.message) ? res.j.error.message : ('HTTP ' + res.status);
+        fail('The model call failed. ' + em + '.', '[error] ' + em);
+        return;
+      }
+      var content = '';
+      try { content = res.j.choices[0].message.content || ''; } catch (e) {}
+      content = String(content);
+      if (!content.trim()) { fail('The model returned an empty reply.', '[error] empty reply'); return; }
+      var out = extractJson(content);
+      if (!out) {
+        // salvage a broken JSON reply: pull the say text out; else if it is prose, speak it
+        var mSay = content.match(/"say"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (mSay) { try { out = { say: JSON.parse('"' + mSay[1] + '"') }; } catch (e) { out = { say: mSay[1] }; } }
+        else if (/^\s*[`{\[]/.test(content)) { fail('The model reply came back garbled.', '[error] unparseable reply'); return; }
+        else out = { say: content.slice(0, 600), read_from: null, read_to: null, goto: null, note: null };
+      }
+      thinking = false;
+      handleOut(out, sid, content);
+    }).catch(function (e) {
+      fail('Could not reach the model.', '[error] network');
+    });
+  }
+
+  function handleOut(out, sid, rawContent) {
+    var summary = out.say || '';
+    if (out.note) {
+      addNote(String(out.note), (sid === ACTIVE && S && S.pos >= 0) ? S.pos : null, sid);
+      summary = summary || 'Noted.';
+    }
+    var from = toInt(out.read_from), to = toInt(out.read_to), go = toInt(out.goto);
+    if (from != null) summary += (summary ? ' ' : '') + '[reads ' + from + (to != null ? '-' + to : '-end') + ']';
+    var raw = '';
+    try { raw = JSON.stringify({ say: out.say || '', read_from: from, read_to: to, goto: go, note: out.note || null }); }
+    catch (e) { raw = String(rawContent || '').slice(0, 800); }
+    pushChatFor(sid, { role: 'assistant', text: summary || '[no action]', raw: raw, ts: Date.now() });
+    if (sid !== ACTIVE || !S) {
+      // the user switched or deleted scripts while the model was thinking:
+      // the note (if any) is filed under the ORIGINAL script; actions are dropped
+      render();
+      toast('Reply arrived for the other script — note filed, actions dropped.');
+      return;
+    }
+    if (from != null) {
+      readRange(from - 1, to != null ? to - 1 : null, out.say || '');
+    } else {
+      if (go != null) { S.pos = clamp(go - 1, 0, Math.max(0, SEGS.length - 1)); saveState(); }
+      if (out.say) speakShort(out.say);
+      render();
+    }
+  }
+
+  // ───────────────────────── notes ─────────────────────────
+  function notesFor(sid) {
+    var out = [];
+    for (var i = 0; i < NOTES.length; i++) if (NOTES[i].sid === sid) out.push(NOTES[i]);
+    return out;
+  }
+  function addNote(text, seg, sid) {
+    NOTES.push({ id: uid(), sid: sid || ACTIVE, ts: Date.now(), seg: seg, text: text });
+    jSet('pr.notes', NOTES);
+    renderNotes();
+  }
+  function notesText() {
+    var by = {}, order = [];
+    for (var i = 0; i < NOTES.length; i++) {
+      var n = NOTES[i];
+      if (!by[n.sid]) { by[n.sid] = []; order.push(n.sid); }
+      by[n.sid].push(n);
+    }
+    var lines = [];
+    for (var j = 0; j < order.length; j++) {
+      var sc = null;
+      for (var k = 0; k < SCRIPTS.length; k++) if (SCRIPTS[k].id === order[j]) sc = SCRIPTS[k];
+      lines.push('=== ' + (sc ? sc.title : 'deleted script') + ' ===');
+      var arr = by[order[j]];
+      for (var m = 0; m < arr.length; m++) {
+        var d = new Date(arr[m].ts);
+        lines.push('[' + d.toISOString().slice(0, 16).replace('T', ' ') + (arr[m].seg != null ? ' · seg ' + (arr[m].seg + 1) : '') + '] ' + arr[m].text);
+      }
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { toast('Copied.'); }, function () { toast('Copy failed.'); });
+      return;
+    }
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('Copied.'); } catch (e) { toast('Copy failed.'); }
+    document.body.removeChild(ta);
+  }
+  function download(name, text, type) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/plain' }));
+    a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 800);
+  }
+
+  // ───────────────────────── rendering ─────────────────────────
+  function warn(msg) {
+    var b = $('warnBanner');
+    if (!msg) { b.style.display = 'none'; return; }
+    b.textContent = msg; b.style.display = '';
+  }
+  function renderWords() {
+    var c = $('wordChips'); c.innerHTML = '';
+    var defs = [
+      ['say anything', 'it lands in the draft'],
+      [W.commit, 'send the draft to the model'],
+      [W.del, 'wipe the draft'],
+      [W.stop, 'stop the voice'],
+    ];
+    for (var i = 0; i < defs.length; i++) {
+      var el = document.createElement('span'); el.className = 'chip';
+      var b = document.createElement('b'); b.textContent = defs[i][0];
+      el.appendChild(b); el.appendChild(document.createTextNode(' — ' + defs[i][1]));
+      c.appendChild(el);
+    }
+  }
+  function renderNow(it) {
+    var sc = activeScript();
+    $('nowCard').style.display = sc ? '' : 'none';
+    if (!sc) return;
+    $('nowTitle').textContent = sc.title;
+    $('nowState').textContent = playing ? (thinking ? 'reading · thinking' : 'reading') : (thinking ? 'thinking' : 'idle');
+    if (it && it.seg != null) {
+      $('nowPos').textContent = 'Segment ' + (it.seg + 1) + ' of ' + SEGS.length;
+      $('nowText').textContent = SEGS[it.seg] || '';
+    } else if (S && S.pos >= 0) {
+      $('nowPos').textContent = 'Segment ' + (S.pos + 1) + ' of ' + SEGS.length;
+      $('nowText').textContent = SEGS[S.pos] || '';
+    } else {
+      $('nowPos').textContent = SEGS.length + ' segments · nothing played yet';
+      $('nowText').textContent = SEGS.length ? SEGS[0] : '';
+    }
+  }
+  function renderChat() {
+    var log = $('chatLog'); log.innerHTML = '';
+    var chat = (S && S.chat) ? S.chat.slice(-14) : [];
+    $('chatCard').style.display = chat.length ? '' : 'none';
+    for (var i = 0; i < chat.length; i++) {
+      var t = document.createElement('div');
+      t.className = 'turn ' + (chat[i].role === 'user' ? 'you' : 'ai');
+      var who = document.createElement('span'); who.className = 'who';
+      who.textContent = chat[i].role === 'user' ? 'you' : 'reader';
+      t.appendChild(who);
+      t.appendChild(document.createTextNode(chat[i].text));
+      log.appendChild(t);
+    }
+    log.scrollTop = log.scrollHeight;
+  }
+  function render() {
+    var mic = $('mic'), st = $('status');
+    if (thinking) { mic.className = 'thinking'; mic.textContent = 'Thinking…'; st.textContent = 'Asking the model…'; }
+    else if (playing) { mic.className = 'reading'; mic.textContent = 'Reading'; st.textContent = 'Say "' + W.stop + '" to stop. Everything else is ignored while it reads.'; }
+    else if (session) { mic.className = 'listening'; mic.textContent = 'Listening'; st.textContent = 'Talk freely — say "' + W.commit + '" to send, "' + W.del + '" to wipe.'; }
+    else { mic.className = ''; mic.textContent = 'Start voice'; st.textContent = 'Tap the circle to start.'; }
+    var d = (S && S.draft) ? S.draft : '';
+    $('draftText').textContent = d || '—';
+    $('draftCount').textContent = d ? (d.split(/\s+/).length + ' words') : 'empty';
+    $('draftCard').className = 'card draftcard' + (d ? ' live' : '');
+    renderNow(null);
+    renderChat();
+  }
+  function renderScripts() {
+    var list = $('scList'); list.innerHTML = '';
+    if (!SCRIPTS.length) {
+      var e = document.createElement('div'); e.className = 'item';
+      e.textContent = 'Nothing yet. Paste your first script above.';
+      list.appendChild(e); return;
+    }
+    for (var i = SCRIPTS.length - 1; i >= 0; i--) {
+      (function (sc) {
+        var it = document.createElement('div'); it.className = 'item' + (sc.id === ACTIVE ? ' on' : '');
+        var g = document.createElement('div'); g.className = 'grow';
+        var t = document.createElement('div'); t.className = 't'; t.textContent = sc.title;
+        var s = document.createElement('div'); s.className = 's';
+        s.textContent = sc.segs.length + ' segments · ' + new Date(sc.ts).toLocaleDateString();
+        g.appendChild(t); g.appendChild(s); it.appendChild(g);
+        if (sc.id !== ACTIVE) {
+          var sel = document.createElement('button'); sel.className = 'act'; sel.textContent = 'Select';
+          sel.addEventListener('click', function () { selectScript(sc.id); });
+          it.appendChild(sel);
+        }
+        var del = document.createElement('button'); del.className = 'act danger'; del.textContent = 'Delete';
+        del.addEventListener('click', function () {
+          if (!confirm('Delete "' + sc.title + '" and its chat? Notes are kept.')) return;
+          SCRIPTS = SCRIPTS.filter(function (x) { return x.id !== sc.id; });
+          jSet('pr.scripts', SCRIPTS);
+          try { localStorage.removeItem(stateKey(sc.id)); } catch (e) {}
+          if (ACTIVE === sc.id) { ACTIVE = SCRIPTS.length ? SCRIPTS[SCRIPTS.length - 1].id : ''; lsSet('pr.active', ACTIVE); stopAll(); loadState(); }
+          renderScripts(); render();
+        });
+        it.appendChild(del);
+        list.appendChild(it);
+      })(SCRIPTS[i]);
+    }
+  }
+  function renderNotes() {
+    var mine = NOTES.slice().reverse();
+    $('noteCount').textContent = NOTES.length + ' total';
+    var list = $('noteList'); list.innerHTML = '';
+    if (!mine.length) {
+      var e = document.createElement('div'); e.className = 'item';
+      e.textContent = 'No notes yet. While listening, just say your comment and then the send word — the model files it here.';
+      list.appendChild(e); return;
+    }
+    for (var i = 0; i < mine.length; i++) {
+      (function (n) {
+        var sc = null;
+        for (var k = 0; k < SCRIPTS.length; k++) if (SCRIPTS[k].id === n.sid) sc = SCRIPTS[k];
+        var it = document.createElement('div'); it.className = 'item';
+        var g = document.createElement('div'); g.className = 'grow';
+        var s = document.createElement('div'); s.className = 's';
+        s.textContent = (sc ? sc.title : 'deleted script') + (n.seg != null ? ' · seg ' + (n.seg + 1) : '') + ' · ' + new Date(n.ts).toLocaleString();
+        var b = document.createElement('div'); b.className = 'body'; b.textContent = n.text;
+        g.appendChild(s); g.appendChild(b); it.appendChild(g);
+        var del = document.createElement('button'); del.className = 'act danger'; del.textContent = 'x';
+        del.addEventListener('click', function () {
+          NOTES = NOTES.filter(function (x) { return x.id !== n.id; });
+          jSet('pr.notes', NOTES); renderNotes();
+        });
+        it.appendChild(del);
+        list.appendChild(it);
+      })(mine[i]);
+    }
+  }
+
+  // ───────────────────────── scripts tab actions ─────────────────────────
+  function selectScript(id) {
+    stopAll();
+    ACTIVE = id; lsSet('pr.active', ACTIVE);
+    loadState(); renderScripts(); render();
+    toast('Selected.');
+  }
+  $('scAdd').addEventListener('click', function () {
+    var title = $('scTitle').value.trim();
+    var text = $('scText').value.trim();
+    if (!text) { toast('Paste the script text first.'); return; }
+    var segs = segmentScript(text);
+    if (!segs.length) { toast('Could not find any text to read.'); return; }
+    var sc = { id: uid(), title: title || ('Script ' + (SCRIPTS.length + 1)), text: text, ts: Date.now(), segs: segs };
+    SCRIPTS.push(sc); jSet('pr.scripts', SCRIPTS);
+    $('scTitle').value = ''; $('scText').value = '';
+    selectScript(sc.id);
+    switchPane('paneRead');
+    toast('Added — ' + segs.length + ' segments.');
+  });
+
+  // ───────────────────────── notes tab actions ─────────────────────────
+  $('noteCopy').addEventListener('click', function () { copyText(notesText() || 'no notes'); });
+  $('noteDl').addEventListener('click', function () { download('pocket-notes.txt', notesText() || 'no notes'); });
+  $('noteClear').addEventListener('click', function () {
+    if (!ACTIVE) return;
+    if (!confirm('Delete all notes for the selected script?')) return;
+    NOTES = NOTES.filter(function (n) { return n.sid !== ACTIVE; });
+    jSet('pr.notes', NOTES); renderNotes();
+  });
+
+  // ───────────────────────── settings tab actions ─────────────────────────
+  function bindSettings() {
+    $('setKey').value = CFG.key;
+    $('setModel').value = CFG.model;
+    $('setPin').checked = CFG.pin;
+    $('setWCommit').value = W.commit;
+    $('setWDel').value = W.del;
+    $('setWStop').value = W.stop;
+    $('setRate').value = String(CFG.rate);
+    $('rateShow').textContent = CFG.rate.toFixed(2).replace(/0+$/, '').replace(/\.$/, '.0');
+    $('setKey').addEventListener('change', function () { CFG.key = $('setKey').value.trim(); lsSet('pr.key', CFG.key); });
+    $('keyEye').addEventListener('click', function () {
+      var k = $('setKey');
+      k.type = k.type === 'password' ? 'text' : 'password';
+      $('keyEye').textContent = k.type === 'password' ? 'show' : 'hide';
+    });
+    $('setModel').addEventListener('change', function () { CFG.model = $('setModel').value.trim() || 'deepseek/deepseek-v4-pro'; lsSet('pr.model', CFG.model); });
+    $('setPin').addEventListener('change', function () { CFG.pin = $('setPin').checked; lsSet('pr.pin', CFG.pin ? '1' : '0'); });
+    function saveWords() {
+      W.commit = norm($('setWCommit').value) || 'execute';
+      W.del = norm($('setWDel').value) || 'delete delete';
+      W.stop = norm($('setWStop').value) || 'stop stop';
+      jSet('pr.words', W); renderWords(); render();
+    }
+    $('setWCommit').addEventListener('change', saveWords);
+    $('setWDel').addEventListener('change', saveWords);
+    $('setWStop').addEventListener('change', saveWords);
+    $('setVoice').addEventListener('change', function () { CFG.voiceName = $('setVoice').value; lsSet('pr.voiceName', CFG.voiceName); });
+    $('setRate').addEventListener('input', function () {
+      CFG.rate = parseFloat($('setRate').value) || 1; lsSet('pr.rate', String(CFG.rate));
+      $('rateShow').textContent = CFG.rate.toFixed(2).replace(/0+$/, '').replace(/\.$/, '.0');
+    });
+    $('voiceTest').addEventListener('click', function () { speakShort('This is the reading voice at the current speed.'); });
+    $('bkDl').addEventListener('click', function () {
+      var dump = {};
+      try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('pr.') === 0) dump[k] = localStorage.getItem(k); } } catch (e) {}
+      download('pocket-reader-backup.json', JSON.stringify(dump, null, 2), 'application/json');
+    });
+    $('bkUpBtn').addEventListener('click', function () { $('bkUp').click(); });
+    $('bkUp').addEventListener('change', function () {
+      var f = $('bkUp').files && $('bkUp').files[0];
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        try {
+          var dump = JSON.parse(String(rd.result));
+          var n = 0;
+          for (var k in dump) if (k.indexOf('pr.') === 0) { lsSet(k, dump[k]); n++; }
+          toast('Restored ' + n + ' entries. Reloading…');
+          setTimeout(function () { location.reload(); }, 900);
+        } catch (e) { toast('That file is not a valid backup.'); }
+      };
+      rd.readAsText(f);
+    });
+    if (navigator.storage && navigator.storage.persisted) {
+      navigator.storage.persisted().then(function (p) {
+        $('storState').textContent = p ? 'protected' : 'best-effort';
+        if (!p && navigator.storage.persist) {
+          navigator.storage.persist().then(function (g) { $('storState').textContent = g ? 'protected' : 'best-effort'; });
+        }
+      }).catch(function () {});
+    }
+  }
+
+  // ───────────────────────── read tab actions ─────────────────────────
+  $('mic').addEventListener('click', function () {
+    if (session) stopSession(); else startSession();
+  });
+  $('btnStart').addEventListener('click', function () { if (S) readRange(0, null, ''); });
+  $('btnContinue').addEventListener('click', function () { if (S) readRange(Math.max(0, S.pos), null, ''); });
+  $('btnStop').addEventListener('click', stopAll);
+  $('typedSend').addEventListener('click', function () {
+    var v = $('typed').value.trim(); $('typed').value = '';
+    if (!v || !S) return;
+    S.draft = (S.draft ? S.draft + ' ' : '') + v; saveState();
+    commit();
+  });
+  $('typed').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('typedSend').click(); });
+  $('clearChat').addEventListener('click', function () { if (S) { S.chat = []; saveState(); render(); } });
+
+  // Pocket mode: black overlay so the phone can sit in a pocket with everything running.
+  var taps = [];
+  $('btnPocket').addEventListener('click', function () { $('pocket').style.display = 'block'; });
+  $('pocket').addEventListener('click', function () {
+    var now = Date.now();
+    taps = taps.filter(function (t) { return now - t < 1200; });
+    taps.push(now);
+    if (taps.length >= 3) { taps = []; $('pocket').style.display = 'none'; }
+  });
+
+  // ───────────────────────── tabs + init ─────────────────────────
+  function switchPane(id) {
+    var tabs = document.querySelectorAll('.tab');
+    for (var i = 0; i < tabs.length; i++) tabs[i].className = 'tab' + (tabs[i].getAttribute('data-pane') === id ? ' on' : '');
+    var panes = document.querySelectorAll('.pane');
+    for (var j = 0; j < panes.length; j++) panes[j].className = 'pane' + (panes[j].id === id ? ' on' : '');
+  }
+  (function () {
+    var tabs = document.querySelectorAll('.tab');
+    for (var i = 0; i < tabs.length; i++) {
+      (function (t) { t.addEventListener('click', function () { switchPane(t.getAttribute('data-pane')); }); })(tabs[i]);
+    }
+  })();
+
+  function updateNet() { $('net').textContent = navigator.onLine ? 'online' : 'offline'; $('net').style.color = navigator.onLine ? '#10b981' : '#f59e0b'; }
+  window.addEventListener('online', updateNet);
+  window.addEventListener('offline', updateNet);
+
+  if (synth) {
+    loadVoices();
+    if (typeof synth.onvoiceschanged !== 'undefined') synth.onvoiceschanged = loadVoices;
+  }
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    try { navigator.serviceWorker.register('./sw.js'); } catch (e) {}
+  }
+
+  if (!ACTIVE && SCRIPTS.length) { ACTIVE = SCRIPTS[SCRIPTS.length - 1].id; lsSet('pr.active', ACTIVE); }
+  loadState();
+  bindSettings();
+  renderWords();
+  renderScripts();
+  renderNotes();
+  updateNet();
+  render();
+  if (!CFG.key) warn('First run: open Settings and paste your OpenRouter API key, then add a script in the Scripts tab.');
+  else if (!SCRIPTS.length) warn('Add a script in the Scripts tab to start.');
+  if (!SR) warn('This browser has no speech recognition — open this page in Chrome on Android. Typing still works.');
+})();
+</script>
+</body>
+</html>

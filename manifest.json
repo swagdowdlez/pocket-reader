@@ -1,0 +1,9 @@
+{
+  "name": "Pocket Reader",
+  "short_name": "Pocket",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "description": "Hands-free script reader and note taker."
+}
